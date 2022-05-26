@@ -1,0 +1,917 @@
+import pygame, os, sys, math, time, random
+
+os.environ['SDL_VIDEO_CENTERED'] = '1'
+
+WHITE = (255, 255, 255)
+OFF_WHITE = (247, 247, 247)
+BLACK = (0, 0, 0)
+LIGHT_GREY = (220, 220, 220)
+GREEN = (0, 255, 0)
+WIN_W = 1500
+WIN_H = 800
+factor = 10
+soldier_w = 20
+soldier_h = 40
+soldier_squad_size = 8
+elite_soldier_w = 40
+elite_soldier_h = 40
+elite_soldier_squad_size = 6
+gladiator_w = 40
+gladiator_h = 50
+gladiator_squad_size = 2
+slow_rifle_damage = 20
+slow_rifle_firerate = 200
+repeat_rifle_damage = 5
+repeat_rifle_firerate = 50
+base_rifle_damage = 20
+base_rifle_firerate = 40
+axe_damage = 100
+axe_firerate = 300
+passive_income = 1
+Red_team = "Red"
+Blue_team = "Blue"
+
+pygame.init()
+
+
+class Game:
+    def __init__(self):
+        self.screen = pygame.display.set_mode((WIN_W, WIN_H), pygame.SRCALPHA)
+        self.intro = self.play = self.outro = True
+        self.menu = False
+        self.currency = 500
+        self.main_theme = Sound("Sound/evenfreakierbits.ogg")
+        self.intro_theme = Sound("Sound/Tetris.ogg")
+        self.shop_theme = Sound("Sound/less_intense_theme.ogg")
+        self.victory_theme = Sound("Sound/intense_theme.ogg")
+        self.intro_text = Text("RTS Game: Click To Start", 40, WIN_W / 2, WIN_H / 2)
+        self.intro_text.rect.centerx = WIN_W / 2
+        self.outro_text = Text("Game Ended. Base has been destroyed. Click to Leave", 40, WIN_W / 2, WIN_H / 2)
+        self.outro_text.rect.centerx = WIN_W / 2
+        self.base = Graphics("images/militarybasebetter.png", 250, 250)
+        self.elite_soldier_rank = Graphics("images/staffsergeantbetter.png", elite_soldier_w, elite_soldier_h)
+        self.gladiator_rank = Graphics("images/skullx7better.png", gladiator_w, gladiator_h)
+        self.soldier_rank = Graphics("images/privateE2better.png", soldier_w, soldier_h)
+        self.enemy_soldier = Graphics("images/red_skull_better.png", 50, 50)
+
+
+class Camera(object):
+    def __init__(self, total_width, total_height):
+        self.state = pygame.Rect(0, 0, total_width, total_height)
+        # print(self.state)
+
+    def apply(self, target):
+        return target.rect.move(self.state.topleft)
+
+    def update(self, camera_entity):
+        self.x_camera(camera_entity)
+        self.y_camera(camera_entity)
+
+    # Stop scrolling at left edge
+    def x_camera(self, camera_entity):
+        self.state.x = camera_entity.rect.x - WIN_W / 2
+
+        if self.state.x < 0:
+            self.state.x = 0
+            camera_entity.rect.x = WIN_W / 2
+
+        elif self.state.x > self.state.width - WIN_W:
+            self.state.x = self.state.width - WIN_W
+            camera_entity.rect.x = self.state.width - WIN_W / 2
+
+        self.state.x *= -1
+
+    def y_camera(self, camera_entity):
+        self.state.y = camera_entity.rect.top - WIN_H / 2
+
+        if self.state.y < 0:
+            self.state.y = 0
+            camera_entity.rect.y = WIN_H / 2
+        elif self.state.y > self.state.height - WIN_H:
+            self.state.y = self.state.height - WIN_H
+            camera_entity.rect.y = self.state.height - WIN_H / 2
+
+        self.state.y *= -1
+
+
+class Platform(pygame.sprite.Sprite):
+    def __init__(self, x, y):
+        pygame.sprite.Sprite.__init__(self)
+        self.image = pygame.Surface((32, 32))
+        self.image.convert()
+        self.image.fill(LIGHT_GREY)
+        self.rect = pygame.Rect(x, y, 32, 32)
+
+
+class CameraEntity(pygame.sprite.Sprite):
+    def __init__(self, container):
+        pygame.sprite.Sprite.__init__(self)
+        self.container = container
+        self.image = pygame.Surface((0, 0))
+        self.rect = pygame.Rect(container.width - 500, container.height / 2, 0, 0)
+
+    def update(self, mouse_down, cam):
+        if mouse_down:
+            move_diff = self.get_move(cam)
+            self.rect = self.rect.move(move_diff)
+
+        if self.rect.left < 0:
+            self.rect.left = 0
+        elif self.rect.right > self.container.right:
+            self.rect.right = self.container.right
+        if self.rect.top < 0:
+            self.rect.top = 0
+        elif self.rect.bottom > self.container.bottom:
+            self.rect.bottom = self.container.bottom
+
+    def get_move(self, cam):
+        new_pos = pygame.mouse.get_pos()
+        move_x = move_y = 0
+        x_diff = (new_pos[0] - (self.rect.x + cam.state.x))
+        y_diff = (new_pos[1] - (self.rect.y + cam.state.y))
+
+        if abs(y_diff) > 3 and abs(x_diff) > 3:
+            theta = math.atan(x_diff / y_diff)
+            move_x = math.sin(theta) * factor
+            move_y = math.cos(theta) * factor
+
+            # quadrant2
+            if x_diff <= 0 and y_diff <= 0:
+                if move_x > 0:
+                    move_x = -move_x
+                if move_y > 0:
+                    move_y = -move_y
+            # quadrant 1
+            elif x_diff >= 0 and y_diff <= 0:
+                if move_x < 0:
+                    move_x *= -1
+                if move_y > 0:
+                    move_y = -move_y
+            # quadrant 4
+            elif x_diff >= 0 and y_diff >= 0:
+                if move_x < 0:
+                    move_x = -move_x
+                if move_y < 0:
+                    move_y = -move_y
+            # quadrant 3
+            elif x_diff <= 0 and y_diff >= 0:
+                if move_x > 0:
+                    move_x = -move_x
+                if move_y < 0:
+                    move_y = -move_y
+
+        return move_x, move_y
+
+
+class Graphics:
+    def __init__(self, file, width, height):
+        self.width = width
+        self.height = height
+        self.image = pygame.image.load(file)
+        self.image.convert_alpha()  
+        self.image = pygame.transform.scale(self.image, (width, height))
+        self.rect = self.image.get_rect()
+
+
+class Text:
+    def __init__(self, string, txt_size, xpos, ypos):
+        self.string = string
+        self.txt_size = txt_size
+        self.font = pygame.font.Font(None, txt_size)
+        self.image = self.font.render(string, 1, 'Black')
+        self.rect = self.image.get_rect()
+        self.rect.x = xpos
+        self.rect.y = ypos
+
+
+class Sound:
+    def __init__(self, file):
+        self.sound = pygame.mixer.Sound(file)
+        self.sound.set_volume(0.18)
+
+
+class Character(pygame.sprite.Sprite):
+    # please make this good
+    def __init__(self, image, pos_x, pos_y, w, h, squad_size, weapon, team):
+        pygame.sprite.Sprite.__init__(self)
+        self.image = image.image
+        self.rect = pygame.Rect(pos_x, pos_y, w, h)
+        self.health = 200
+        self.team = team
+        self.selected = False
+        self.move = False
+        self.diff_location = [0, 0]
+        self.pressed = False
+        self.counter = 0
+        self.mouse_pos = (0, 0)
+        self.target_mouse_pos = [0, 0]
+        self.x = self.rect.x
+        self.y = self.rect.y
+        self.targeting = False
+        self.weapon = weapon
+        self.squad_size = squad_size
+        self.spawn = False
+        self.target = None
+        self.moving = False
+        self.idle_counter = 0
+        self.idle_distance = 40
+        self.idle_target = [0, 0]
+        self.idle_diff = [0, 0]
+        self.timing = random.randrange(150, 300)
+
+    def update(self, cam, left_click, right_click, character_group, shop, timer, total_rect, base_group):
+        # print(self.target_mouse_pos[0], self.target_mouse_pos[1])
+        self.rect.clamp_ip(total_rect)
+        self.mouse_pos = (pygame.mouse.get_pos()[0] - cam.state.x, pygame.mouse.get_pos()[1] - cam.state.y)
+        if not self.moving:
+            self.idle(timer)
+
+        # attack
+        if self.target != None:
+            if self.target.health <= 0:
+                self.targeting = False
+                self.target = None
+
+        for c in character_group:
+            if self.target == None:
+                if abs((self.rect.centerx - c.rect.centerx) ** 2 - (self.rect.centery - c.rect.centery) ** 2) ** 0.5 <= self.weapon.range and c.team != self.team:
+                    self.targeting = True
+                    self.target = c
+
+        for b in base_group:
+            if b.team == "Blue":
+                if self.rect.right >= b.rect.left and self.rect.top >= b.rect.top and self.rect.bottom <= b.rect.bottom:
+                    self.pressed = False
+                if self.rect.top <= b.rect.bottom and self.rect.bottom >= b.rect.top and self.rect.right >= b.rect.left:
+                    self.pressed = False
+
+            if b.team == "Red":
+                if self.rect.left <= b.rect.right and self.rect.top >= b.rect.top and self.rect.bottom <=  b.rect.bottom:
+                    self.pressed = False
+                if self.rect.top <= b.rect.bottom and self.rect.bottom >= b.rect.top  and self.rect.left <= b.rect.right:
+                    self.pressed = False
+
+            if self.target == None:
+                if abs(((self.rect.left - b.rect.right) ** 2) - abs(self.rect.centery - b.rect.centery) ** 2) ** 0.5 <= self.weapon.range and b.team != self.team:
+                    self.targeting = True
+                    self.target = b
+
+        if self.selected and right_click and self.team != "Red":
+            for character in character_group:
+                if character.rect.left <= self.mouse_pos[0] and character.rect.right >= self.mouse_pos[0] and character.rect.top <= self.mouse_pos[1] and character.rect.bottom >= self.mouse_pos[1] and character.team != self.team:
+                    self.targeting = True
+                    self.target = character
+
+                for b in base_group:
+                    if b.rect.left <= self.mouse_pos[0] and b.rect.right >= self.mouse_pos[0] and b.rect.top <= self.mouse_pos[1] and b.rect.bottom >= self.mouse_pos[1] and b.team != self.team:
+                        self.targeting = True
+                        self.target = b
+
+        if self.team != "Red":
+            if self.selected and left_click:
+                self.counter += 1
+
+            if not self.selected:
+                self.counter *= 0
+
+            if self.counter == 1:
+                self.diff_location[0] = self.mouse_pos[0] - self.rect.centerx
+                self.diff_location[1] = self.mouse_pos[1] - self.rect.centery
+                self.target_mouse_pos[0] = self.mouse_pos[0]
+                self.target_mouse_pos[1] = self.mouse_pos[1]
+                self.pressed = True
+                self.selected = False
+            # move
+            if self.pressed:
+                self.moving = True
+                self.x += self.get_move(3, self.diff_location)[0]
+                self.y += self.get_move(3, self.diff_location)[1]
+                self.rect.x = self.x
+                self.rect.y = self.y
+
+                if abs(self.target_mouse_pos[0] - self.rect.centerx) <= factor * 3.3 and abs(self.target_mouse_pos[1] - self.rect.centery) <= factor * 3.3:
+                    self.moving = False
+                    self.pressed = False
+
+        if self.team == "Red":
+            if self.pressed and self.target == None:
+                self.x += self.get_move(3, self.diff_location)[0]
+                self.y == self.get_move(3, self.diff_location)[1]
+                self.rect.x = self.x
+                self.rect.y = self.y
+
+            if timer % 5000 == 0:
+                for b in base_group:
+                    if b.main_base and b.team != self.team:
+                        self.pressed = True
+                        self.target_mouse_pos[0] = b.rect.x - 300
+                        self.target_mouse_pos[1] = b.rect.y
+                        self.diff_location[0] = (b.rect.x - 300) - self.rect.centerx
+                        self.diff_location[1] = b.rect.y - self.rect.centery
+                        self.moving = True
+
+            if abs(self.target_mouse_pos[0] - self.rect.centerx) <= factor * 3.3 and abs(self.target_mouse_pos[1] - self.rect.centery) <= factor * 3.3:
+                self.moving = False
+                self.pressed = False
+
+
+                # else:
+                # self.targeting = False
+
+            # damage
+        if self.health <= 0:
+            self.kill()
+
+    def idle(self, timer):
+        if timer % self.timing == 0:
+            angle = random.randrange(0, 360)
+            x_move = math.cos(angle) * self.idle_distance
+            y_move = math.sin(angle) * self.idle_distance
+            self.idle_target[0] = self.x + x_move
+            self.idle_target[1] = self.y + y_move
+            self.idle_diff[0] = x_move
+            self.idle_diff[1] = y_move
+            self.move = True
+
+        if self.move:
+            self.x += self.get_move(0.8, self.idle_diff)[0]
+            self.y += self.get_move(0.8, self.idle_diff)[1]
+            self.rect.x = self.x
+            self.rect.y = self.y
+        if abs(self.idle_target[0] - self.rect.x) <= 5 and abs(self.idle_target[1] - self.rect.y) <= 5:
+            self.move = False
+
+
+    def get_move(self, factor, cords):
+        move_x = move_y = 0
+        x_diff = cords[0]
+        y_diff = cords[1]
+
+        if abs(y_diff) > 3 and abs(x_diff) > 3:
+            theta = math.atan(x_diff / y_diff)
+            move_x = math.sin(theta) * factor
+            move_y = math.cos(theta) * factor
+
+            # quadrant2
+            if x_diff <= 0 and y_diff <= 0:
+                if move_x > 0:
+                    move_x = -move_x
+                if move_y > 0:
+                    move_y = -move_y
+            # quadrant 1
+            elif x_diff >= 0 and y_diff <= 0:
+                if move_x < 0:
+                    move_x *= -1
+                if move_y > 0:
+                    move_y = -move_y
+            # quadrant 4
+            elif x_diff >= 0 and y_diff >= 0:
+                if move_x < 0:
+                    move_x = -move_x
+                if move_y < 0:
+                    move_y = -move_y
+            # quadrant 3
+            elif x_diff <= 0 and y_diff >= 0:
+                if move_x > 0:
+                    move_x = -move_x
+                if move_y < 0:
+                    move_y = -move_y
+
+        return move_x, move_y
+
+
+class Base(Character):
+    def __init__(self, image, x_pos, y_pos, total_rect, w, h, health, team, weapon, armed, main_base, can_spawn, character_group):
+        Character.__init__(self, image, x_pos, y_pos, w, h, 0, weapon, team)
+        self.character_group = character_group
+        self.health = health
+        self.weapon = weapon
+        self.armed = armed
+        self.container = total_rect
+        self.main_base = main_base
+        self.can_spawn = can_spawn
+
+    def update(self, timer, weapon, character_group, image):
+        if self.team == "Red":
+            if timer % 800 == 0:
+                for i in range(2):
+                    character = Character(image, self.rect.left + 400, self.rect.centery, soldier_w, soldier_h, 5, weapon, Red_team)
+                    character_group.add(character)
+        if self.rect.right > self.container.right:
+            self.rect.right = self.container.right
+        if self.rect.left < self.container.left:
+            self.rect.left = self.container.left
+        if self.rect.top < self.container.top:
+            self.rect.top = self.container.top
+        if self.rect.bottom > self.container.bottom:
+            self.rect.bottom = self.container.bottom
+
+        if self.target != None:
+            if self.target.health <= 0:
+                self.target = None
+        for c in self.character_group:
+            if abs((self.rect.centerx - c.rect.centerx) ** 2 - (self.rect.centery - c.rect.centery) ** 2) ** 0.5 <= self.weapon.range and c.team != self.team:
+                self.targeting = True
+                self.target = None
+
+        if self.health <= 0:
+            self.kill()
+
+
+class Box(pygame.sprite.Sprite):
+    def __init__(self):
+        pygame.sprite.Sprite.__init__(self)
+        self.image = pygame.Surface((0, 0))
+        self.image.fill(GREEN)
+        self.rect = pygame.Rect(0, 0, 0, 0)
+        self.start_pos = [0, 0]
+        self.end_pos = [0, 0]
+        self.press_count = 0
+        self.release_count = 0
+        self.click_count = 0
+        self.vertical_line = pygame.Surface((0, 0))
+        self.horizontal_line = pygame.Surface((0, 0))
+        self.down = self.up = False
+
+    def update(self, right_click, cam, character_group, left_click, right_click_up):
+        if right_click:
+            self.press_count += 1
+        else:
+            self.press_count = 0
+
+        if self.press_count == 1:
+            self.start_pos[0] = pygame.mouse.get_pos()[0] + abs(cam.state.x)
+            self.start_pos[1] = pygame.mouse.get_pos()[1] + abs(cam.state.y)
+            self.down = True
+
+        if right_click_up:
+            self.release_count += 1
+
+        else:
+            self.release_count = 0
+
+        if left_click:
+            self.click_count += 1
+
+            if self.click_count == 1:
+                self.image = pygame.Surface((0, 0))
+                self.click_count = 0
+                for c in character_group:
+                    c.counter = 0
+
+        if self.release_count == 1:
+            self.end_pos[0] = pygame.mouse.get_pos()[0] + abs(cam.state.x)
+            self.end_pos[1] = pygame.mouse.get_pos()[1] + abs(cam.state.y)
+            self.up = True
+
+        if self.down and self.up:
+            # print(self.start_pos[0], self.start_pos[1], self.end_pos[0], self.end_pos[1])
+
+            x_diff = (self.end_pos[0] - self.start_pos[0])
+            y_diff = (self.end_pos[1] - self.start_pos[1])
+
+            # quadrant_4(bottom right)
+            if x_diff < 0 and y_diff < 0:
+                self.rect.x = self.end_pos[0]
+                self.rect.y = self.end_pos[1]
+
+            # quadrant 1(top right)
+            elif x_diff < 0 and y_diff > 0:
+                self.rect.x = self.end_pos[0]
+                self.rect.y = self.start_pos[1]
+
+            # quadrant 2(top left)
+            elif x_diff > 0 and y_diff > 0:
+                self.rect.x = self.start_pos[0]
+                self.rect.y = self.start_pos[1]
+
+            # quadrant 3(bottom left)
+            elif x_diff > 0 and y_diff < 0:
+                self.rect.x = self.start_pos[0]
+                self.rect.y = self.end_pos[1]
+
+            self.down = self.up = False
+            self.image = pygame.Surface((abs(x_diff), abs(y_diff)), pygame.SRCALPHA)
+            self.rect.w = abs(x_diff)
+            self.rect.h = abs(y_diff)
+            self.vertical_line = pygame.Surface((1, abs(y_diff)))
+            self.horizontal_line = pygame.Surface((abs(x_diff), 1))
+            self.image.blit(self.vertical_line, (0, 0))
+            self.image.blit(self.vertical_line, (self.rect.w - 1, 0))
+            self.image.blit(self.horizontal_line, (0, 0))
+            self.image.blit(self.horizontal_line, (0, self.rect.h - 1))
+            self.vertical_line = pygame.Surface((0, 0), pygame.SRCALPHA)
+            self.horizontal_line = pygame.Surface((0, 0), pygame.SRCALPHA)
+            pygame.display.flip()
+
+            for character in character_group:
+                if character.rect.top > self.rect.top and character.rect.right < self.rect.right and character.rect.bottom < self.rect.bottom and character.rect.left > self.rect.left:
+                    character.selected = True
+                else:
+                    character.selected = False
+
+
+# if type == True, ranged weapon
+# firerate is how many iterations between firing
+class Weapon(pygame.sprite.Sprite):
+    def __init__(self, damage, firerate, ranged, container, name, range):
+        pygame.sprite.Sprite.__init__(self)
+        self.damage = damage
+        self.firerate = firerate
+        self.type = ranged
+        self.container = container
+        self.name = name
+        self.range = range
+
+    def update(self, character, bullet_group, camera, timer):
+        if self.type:
+            # out of range/ firerate
+            if character.targeting and character.weapon.name == self.name:
+                if timer % self.firerate == 0 and abs((character.rect.centerx - character.target.rect.centerx) ** 2 - (
+                        character.rect.centery - character.target.rect.centery) ** 2) ** 0.5 <= self.range:
+                    bullet = Bullet(character, self.container, camera)
+                    bullet_group.add(bullet)
+
+        else:
+            if character.targeting and character.weapon.name == self.name:
+                if timer % self.firerate == 0 and abs((character.rect.centerx - character.target.rect.centerx) ** 2 - (
+                        character.rect.centery - character.target.rect.centery) ** 2) ** 0.5 <= self.range:
+                    character.target.health -= self.damage
+
+
+class Bullet(pygame.sprite.Sprite):
+    def __init__(self, character, container, camera):
+        pygame.sprite.Sprite.__init__(self)
+        self.container = container
+        self.speed = 100
+        self.image = pygame.Surface((5, 5)).convert()
+        self.rect = pygame.Rect(0, 0, 5, 5)
+        self.set_pos(character)
+        self.x = self.rect.x
+        self.y = self.rect.y
+        self.character = character
+        self.move_amount = self.get_move((self.character.target.rect.centerx, self.character.target.rect.centery))
+
+    def update(self):
+        self.x += self.move_amount[0]
+        self.y += self.move_amount[1]
+        # time.sleep(5)
+        self.rect.x = self.x
+        self.rect.y = self.y
+        # time.sleep(5)
+        if self.character.target != None:
+            if self.rect.x > self.container.right or self.rect.x < self.container.left or self.rect.y > self.container.bottom or self.rect.y < self.container.top:
+                self.kill()
+            if self.rect.right <= self.character.target.rect.right and self.rect.left >= self.character.target.rect.left and self.rect.bottom <= self.character.target.rect.bottom and self.rect.top >= self.character.target.rect.top:
+                self.kill()
+                self.character.target.health -= self.character.weapon.damage
+            else:
+                self.check_hit(self.character.target, self.move_amount[0], self.move_amount[1])
+
+    def set_pos(self, character):
+        self.rect.centerx = character.rect.centerx
+        self.rect.centery = character.rect.centery
+
+    def check_hit(self, target, dx, dy):
+        iteration = 0
+        while iteration <= self.speed / 4:
+            dx *= 0.9
+            dy *= 0.9
+            if self.rect.right - dx <= target.rect.right and self.rect.left - dx >= target.rect.left and self.rect.bottom - dy <= target.rect.bottom and self.rect.top - dy >= target.rect.top:
+                self.kill()
+                self.character.target.health -= self.character.weapon.damage
+            iteration += 1
+
+    def get_move(self, target):
+        move_x = move_y = 0
+        x_diff = target[0] - self.rect.x
+        y_diff = target[1] - self.rect.y
+
+        if abs(y_diff) > 3 and abs(x_diff) > 3:
+            theta = math.atan(x_diff / y_diff)
+            move_x = math.sin(theta) * self.speed
+            move_y = math.cos(theta) * self.speed
+
+            # quadrant2
+            if x_diff <= 0 and y_diff <= 0:
+                if move_x > 0:
+                    move_x = -move_x
+                if move_y > 0:
+                    move_y = -move_y
+            # quadrant 1
+            elif x_diff >= 0 and y_diff <= 0:
+                if move_x < 0:
+                    move_x *= -1
+                if move_y > 0:
+                    move_y = -move_y
+            # quadrant 4
+            elif x_diff >= 0 and y_diff >= 0:
+                if move_x < 0:
+                    move_x = -move_x
+                if move_y < 0:
+                    move_y = -move_y
+            # quadrant 3
+            elif x_diff <= 0 and y_diff >= 0:
+                if move_x > 0:
+                    move_x = -move_x
+                if move_y < 0:
+                    move_y = -move_y
+
+        return move_x, move_y
+
+
+class Shop(pygame.sprite.Sprite):
+    def __init__(self, base):
+        super().__init__()
+        self.rect = base.rect
+        self.image = base.image
+
+    def update(self, camera, run):
+        mouse_pos = pygame.mouse.get_pos()
+        rect = camera.apply(self)
+        coll = rect.collidepoint(mouse_pos)
+        if coll and pygame.mouse.get_pressed()[0]:
+            run.shop_theme.sound.play(-1)
+            run.menu = True
+
+
+class Icon(pygame.sprite.Sprite):
+    def __init__(self, image, x, y, w, h, price, character, character_group, blue_base):
+        super().__init__()
+        self.origin_image = image
+        self.image = image.image
+        self.rect = pygame.Rect((x, y), (w, h))
+        self.price = price
+        self.character = character
+        self.character_group = character_group
+        self.blue_base = blue_base
+        self.count = 0
+
+    def update(self, mouse_pos, game, left_click):
+        if left_click:
+            self.count += 1
+        if mouse_pos[0] >= self.rect.left and mouse_pos[0] <= self.rect.right and mouse_pos[1] >= self.rect.top and mouse_pos[1] <= self.rect.bottom and left_click:
+            if game.currency >= self.price and self.count == 1:
+                game.currency -= self.price
+                for i in range(self.character.squad_size):
+                    character = Character(self.origin_image, self.blue_base.rect.left - 100, self.blue_base.rect.centery, self.character.rect.w, self.character.rect.h, self.character.squad_size, self.character.weapon, self.character.team)
+                    self.character_group.add(character)
+
+        if not left_click:
+            self.count *= 0
+
+
+def main():
+    fps = 60
+    clock = pygame.time.Clock()
+    run = Game()
+
+    # create groups
+    platform_group = pygame.sprite.Group()
+    cam_group = pygame.sprite.Group()
+    character_group = pygame.sprite.Group()
+    box_group = pygame.sprite.Group()
+    bullet_group = pygame.sprite.Group()
+    weapon_group = pygame.sprite.Group()
+    shop_icon_group = pygame.sprite.Group()
+    base_group = pygame.sprite.Group()
+
+    level = [
+        "PPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "P                                                                                                                                        P",
+        "PPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP", ]
+
+    # Build Level
+    x = y = 0
+    for row in level:
+        for col in row:
+            if col == "P":
+                p = Platform(x, y)
+                platform_group.add(p)
+            x += 32
+        y += 32
+        x = 0
+
+    total_width = len(level[0]) * 32
+    total_height = len(level) * 32
+
+    total_rect = pygame.Rect(0, 0, total_width, total_height)
+    background = Graphics("images/grass_2.jpeg", total_width, total_height)
+    slow_rifle = Weapon(slow_rifle_damage, slow_rifle_firerate, True, total_rect, "slow_rifle", 1200)
+    axe = Weapon(axe_damage, axe_firerate, False, total_rect, "axe", 200)
+    repeat_rifle = Weapon(repeat_rifle_damage, repeat_rifle_firerate, True, total_rect, "repeat_rifle", 1100)
+    base_rifle = Weapon(base_rifle_damage, base_rifle_firerate, True, total_rect, "base_rifle", 1200)
+    camera_entity = CameraEntity(total_rect)
+    box = Box()
+    main_base_blue = Base(run.base, total_rect.w - (total_rect.w / 100), total_rect.h / 2, total_rect, 250, 250, 2500, Blue_team, base_rifle, True, True, True, character_group)
+    main_base_red = Base(run.base, total_rect.w / 100, total_rect.h / 2, total_rect, 250, 250, 2500, Red_team, base_rifle, True, True, True, character_group)
+    shop = Shop(main_base_blue)
+    soldier = Character(run.soldier_rank, main_base_blue.rect.x - 500, main_base_blue.rect.centery + 100, soldier_w, soldier_h, soldier_squad_size, slow_rifle, Blue_team)
+    gladiator = Character(run.gladiator_rank, main_base_blue.rect.x - 500, main_base_blue.rect.centery - 100, gladiator_w, gladiator_h, gladiator_squad_size, axe, Blue_team)
+    elite_soldier = Character(run.elite_soldier_rank, main_base_blue.rect.x - 500, main_base_blue.rect.centery, elite_soldier_w, elite_soldier_h, elite_soldier_squad_size, repeat_rifle, Blue_team)
+    shop_icon_1 = Icon(run.soldier_rank, WIN_W / 4, 300, soldier_w, soldier_h, 100, soldier, character_group, main_base_blue)
+    shop_icon_2 = Icon(run.gladiator_rank, WIN_W / 2, 300, gladiator_w, gladiator_h, 200, gladiator, character_group, main_base_blue)
+    shop_icon_3 = Icon(run.elite_soldier_rank, WIN_W * (3 / 4), 300, elite_soldier_w, elite_soldier_h, 200, elite_soldier, character_group, main_base_blue)
+
+    cam_group.add(camera_entity)
+    character_group.add(gladiator, soldier, elite_soldier)
+    weapon_group.add(slow_rifle, axe, repeat_rifle, base_rifle)
+    box_group.add(box)
+    base_group.add(main_base_blue)
+    base_group.add(main_base_red)
+    shop_icon_group.add(shop_icon_1, shop_icon_2, shop_icon_3)
+    camera = Camera(total_width, total_height)
+    hold_down_mouse = right_click = left_click = shop_left_click = False
+    mouse_pos = [0, 0]
+    timer = 0
+    count = 0
+    intro_count = 0
+
+    while True:
+        while run.intro:
+            run.outro = True
+            run.screen.fill(WHITE)
+            run.screen.blit(run.intro_text.image, run.intro_text.rect)
+            run.victory_theme.sound.stop()
+            run.intro_theme.sound.set_volume(0.07)
+            if intro_count < 1:
+                run.intro_theme.sound.play(-1)
+                intro_count += 1
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    sys.exit()
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    run.intro = False
+            pygame.display.flip()
+
+        while run.play:
+            intro_count = 0
+            run.intro_theme.sound.stop()
+            if count < 1:
+                run.main_theme.sound.play(-1)
+                count += 1
+            if run.menu:
+                count = 0
+                run.main_theme.sound.stop()
+                run.screen.fill(LIGHT_GREY)
+                shop_icon_group.draw(run.screen)
+                mouse_pos[0] = pygame.mouse.get_pos()[0]
+                mouse_pos[1] = pygame.mouse.get_pos()[1]
+                shop_icon_group.update(mouse_pos, run, shop_left_click)
+                currency_text = Text("Money: " + str(run.currency), 40, 32, 32)
+                run.screen.blit(currency_text.image, currency_text.rect)
+
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        sys.exit()
+                    if event.type == pygame.KEYDOWN:
+                        if event.key == pygame.K_ESCAPE:
+                            run.menu = False
+                    if event.type == pygame.MOUSEBUTTONDOWN:
+                        if event.button == 1:
+                            shop_left_click = True
+                    if event.type == pygame.MOUSEBUTTONUP:
+                        if event.button == 1:
+                            shop_left_click = False
+            else:
+                run.shop_theme.sound.stop()
+                timer += 1
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        sys.exit()
+                    elif event.type == pygame.MOUSEBUTTONDOWN:
+                        if event.button == 1:
+                            box.update(False, camera, character_group, True, False)
+                            left_click = True
+                        if event.button == 2:
+                            hold_down_mouse = True
+                        if event.button == 3:
+                            box.update(True, camera, character_group, False, False)
+                            right_click = True
+                    elif event.type == pygame.MOUSEBUTTONUP:
+                        if event.button == 1:
+                            left_click = False
+                        if event.button == 2:
+                            hold_down_mouse = False
+                        if event.button == 3:
+                            box.update(False, camera, character_group, False, True)
+                            right_click = False
+                shop.update(camera, run)
+                camera_entity.update(hold_down_mouse, camera)
+                base_group.update(timer, repeat_rifle, character_group, run.enemy_soldier)
+                if run.menu:
+                    left_click = False
+                character_group.update(camera, left_click, right_click, character_group, shop, timer, total_rect, base_group)
+                for c in character_group:
+                    weapon_group.update(c, bullet_group, camera, timer)
+                for b in base_group:
+                    if b.target != None:
+                        weapon_group.update(b, bullet_group, camera, timer)
+                bullet_group.update()
+                camera.update(camera_entity)
+                if timer % 10 == 0:
+                    run.currency += passive_income
+
+                run.screen.fill(WHITE)
+                run.screen.blit(background.image, camera.apply(background))
+                for p in platform_group:
+                    run.screen.blit(p.image, camera.apply(p))
+                for s in cam_group:
+                    run.screen.blit(s.image, camera.apply(s))
+                for c in character_group:
+                    run.screen.blit(c.image, camera.apply(c))
+                for b in box_group:
+                    run.screen.blit(b.image, camera.apply(b))
+                for bullet in bullet_group:
+                    run.screen.blit(bullet.image, camera.apply(bullet))
+                for base in base_group:
+                    run.screen.blit(base.image, camera.apply(base))
+                run.screen.blit(shop.image, camera.apply(shop))
+                currency_text = Text("Money: " + str(run.currency), 40, 32, 32)
+                main_base_blue_text = Text("Base Health " + str(main_base_blue.health), 40, main_base_blue.rect.left, main_base_blue.y - 25)
+                main_base_red_text = Text("Base Health: " + str(main_base_red.health), 40, main_base_red.x, main_base_red.y - 25)
+                if main_base_red.health > 0:
+                    run.screen.blit(main_base_red_text.image, camera.apply(main_base_red_text))
+                if main_base_blue.health > 0:
+                    run.screen.blit(main_base_blue_text.image, camera.apply(main_base_blue_text))
+                run.screen.blit(currency_text.image, currency_text.rect)
+
+            clock.tick(fps)
+            pygame.display.flip()
+            if main_base_red.health <= 0 or main_base_blue.health <= 0:
+                run.play = False
+                run.main_theme.sound.stop()
+                run.victory_theme.sound.play(-1)
+
+        while run.outro:
+            run.screen.fill(WHITE)
+            run.screen.blit(run.outro_text.image, run.outro_text.rect)
+            run.play = run.intro = True
+            for c in character_group:
+                c.kill()
+            count = 0
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    sys.exit()
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    sys.exit()
+            pygame.display.flip()
+
+
+main()
